@@ -1,5 +1,5 @@
 (function attachPowerDashboardData() {
-  // 1. 아산공학관 강의실 생성 (101~410)
+
   const asanClassrooms = [];
   for (let f = 1; f <= 4; f++) {
     for (let r = 1; r <= 10; r++) {
@@ -13,7 +13,6 @@
     }
   }
 
-  // 2. 신공학관 강의실 생성 (B201~510)
   const newClassrooms = [];
   const newFloors = ["B2", "B1", "1", "2", "3", "4", "5"];
   newFloors.forEach(f => {
@@ -28,8 +27,7 @@
     }
   });
 
-  // 3. 기기 5개를 각각 다른 강의실에 딱 하나씩만 배치
-  // [아산공학관 구역]
+
   asanClassrooms.find(c => c.id === "A401").devices = [
     { id: "dev-pot", name: "커피포트", currentW: 0, isOn: false }
   ];
