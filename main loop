@@ -1,0 +1,123 @@
+#include <Arduino.h>
+#include <arduinoFFT.h>
+#include <deque> // 필요시 직접 구현하거나 배열로 대체
+
+// =====================================================
+// 1. 기본 설정 및 핀 정의
+// =====================================================
+#define RELAY_PIN 26
+#define SAMPLES 128          // 파이썬의 waveform 길이와 맞춰야 함 (2의 거듭제곱 추천)
+#define SAMPLING_FREQ 1000   // Hz
+
+double vReal[SAMPLES];
+double vImag[SAMPLES];
+ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLING_FREQ);
+
+// 상태 관리 변수
+String current_state = "UNKNOWN";
+unsigned long state_start_time = 0;
+bool cutoff_executed = false;
+
+// =====================================================
+// 2. 상태 안정화 (Stabilizer) 클래스
+// =====================================================
+class StateStabilizer {
+  private:
+    int window;
+    String buffer[5]; // 파이썬의 window=5와 동일
+    int index = 0;
+    int count = 0;
+
+  public:
+    StateStabilizer(int w) : window(w) {}
+
+    String update(String new_state) {
+        buffer[index] = new_state;
+        index = (index + 1) % window;
+        if (count < window) count++;
+
+        int match_count = 0;
+        for (int i = 0; i < window; i++) {
+            if (buffer[i] == new_state) match_count++;
+        }
+
+        if (match_count == window) return new_state;
+        return ""; // 아직 불안정함
+    }
+};
+
+StateStabilizer stabilizer(5);
+
+// =====================================================
+// 3. 머신러닝 추론 함수 (C++로 변환된 모델)
+// =====================================================
+// ※ 이 부분은 m2cgen 등을 통해 변환된 코드를 넣어야 합니다.
+String predict_state(float rms, float h1, float h3, float h5, float h7) {
+    if (rms < 0.15) return "Standby";
+    
+    // 예시: 간단한 로직 (실제 모델의 결정 트리 조건으로 대체 필요)
+    // if (h3 > 0.5 && h5 < 0.2) return "Active"; 
+    
+    // 실제 모델의 predict_proba >= 80% 로직을 여기에 구현
+    return "Active"; 
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(RELAY_PIN, OUTPUT);
+    digitalWrite(RELAY_PIN, HIGH); // 초기 ON
+    Serial.println("🚀 NILM 독립 시스템 시작");
+}
+
+void loop() {
+    // ---------------------------------------------
+    // (1) 센서 데이터 수집 (Waveform 샘플링)
+    // ---------------------------------------------
+    for (int i = 0; i < SAMPLES; i++) {
+        vReal[i] = analogRead(34) * (3.3 / 4095.0); // 전압/전류 센서 핀
+        vImag[i] = 0;
+        delayMicroseconds(1000000 / SAMPLING_FREQ);
+    }
+
+    // ---------------------------------------------
+    // (2) 특징 추출 (RMS 및 FFT)
+    // ---------------------------------------------
+    double sumSq = 0;
+    for (int i = 0; i < SAMPLES; i++) sumSq += vReal[i] * vReal[i];
+    float rms = sqrt(sumSq / SAMPLES);
+
+    FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+    FFT.compute(FFT_FORWARD);
+    FFT.complexToMagnitude();
+
+    float h1 = (float)vReal[1]; // 인덱스는 주파수 해상도에 따라 조정 필요
+    float h3 = (float)vReal[3];
+    float h5 = (float)vReal[5];
+    float h7 = (float)vReal[7];
+
+    // ---------------------------------------------
+    // (3) 상태 예측 및 안정화
+    // ---------------------------------------------
+    String raw_state = predict_state(rms, h1, h3, h5, h7);
+    String stable_state = stabilizer.update(raw_state);
+
+    if (stable_state != "" && stable_state != current_state) {
+        current_state = stable_state;
+        state_start_time = millis();
+        cutoff_executed = false;
+        Serial.println("상태 확정 → " + current_state);
+    }
+
+    // ---------------------------------------------
+    // (6) 전력 차단 판단 (Policy)
+    // ---------------------------------------------
+    if (current_state == "Standby" && !cutoff_executed) {
+        unsigned long elapsed = (millis() - state_start_time) / 1000;
+        if (elapsed >= 600) { // 10분(600초)
+            Serial.println("⚡ 릴레이 OFF 실행");
+            digitalWrite(RELAY_PIN, LOW);
+            cutoff_executed = true;
+        }
+    }
+}
+
