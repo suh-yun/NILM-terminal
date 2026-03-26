@@ -1,7 +1,3 @@
-C2의 1-1 수정.
-C1의 1-2번 탭의 아두이노 코드의 듀얼 채널(고/저전력) 제어 기능에 맞추어 코드를 수정함.
-아두이노로 H_OFF\n, L_OFF\n 같은 명령어를 생성하여 전송.
-states 딕셔너리와 StateStabilizer 인스턴스를 두 개씩 사용하여 고/저전력 콘센트가 서로의 타이머에 영향을 주지 않고 개별적으로 관리하도록 구성.
 
 import serial
 import numpy as np
@@ -10,18 +6,15 @@ import time
 import joblib
 from collections import deque
 
-# ===============================
 # 1. 설정
-# ===============================
+
 PORT = 'COM5'
 BAUD = 115200
 
-# 모델 로드 (고전력/저전력 공용 혹은 각각 로드 가능)
 model = joblib.load('nilm_model.pkl')
 feature_cols = ['current', 'H1', 'H3', 'H5', 'H7']
 ser = serial.Serial(PORT, BAUD, timeout=1)
 
-# 상태 안정화 클래스 (채널별로 관리하기 위해 인스턴스 2개 생성)
 class StateStabilizer:
     def __init__(self, window=5):
         self.window = window
@@ -34,19 +27,15 @@ class StateStabilizer:
             self.stable_state = new_state
         return self.stable_state
 
-# 고전력(High)용과 저전력(Low)용 안정화 장치 분리
 stabilizer_H = StateStabilizer(window=5)
 stabilizer_L = StateStabilizer(window=5)
 
-# 채널별 상태 관리 변수
 states = {
     'H': {'current': None, 'start_time': None, 'cutoff': False},
     'L': {'current': None, 'start_time': None, 'cutoff': False}
 }
 
-# ===============================
-# 3. 전력 차단 전략 (수정됨)
-# ===============================
+
 STRATEGY = {
     "Standby": {"limit": 600}, # 10분 후 차단
     "Active":  {"limit": None}
@@ -59,9 +48,6 @@ def execute_cutoff(channel):
     states[channel]['cutoff'] = True
     print(f"\n[⚡ {channel} 채널 전력 차단 실행!]")
 
-# ===============================
-# 4. 메인 루프
-# ===============================
 print("=== NILM 듀얼 채널 제어 시스템 시작 ===")
 
 try:
