@@ -1,24 +1,24 @@
 // 실시간 전류 수신 + 전력으로 계산 + 실시간으로 띄우기
 
-// app.js 파일 최상단
+
 const viewEl = document.getElementById("view");
 const btnPower = document.getElementById("btn-power");
 const btnCommunity = document.getElementById("btn-community");
 let btnClassrooms = document.getElementById("btn-classrooms");
 
-const ESP32_IP_ONLY = "10.63.101.69"; // 수현님 ESP32 IP
+const ESP32_IP_ONLY = "10.63.101.69"; 
 const ESP32_HTTP_BASE = `http://${ESP32_IP_ONLY}`;
 
 // 페이지 로드 시 실행
 window.onload = function() {
     console.log('데이터 수신 시작 (HTTP Polling)...');
-    // 1초마다 데이터를 가져오는 타이머 실행
+    // 1초마다 데이터
     setInterval(fetchData, 1000); 
 };
 
 async function fetchData() {
     try {
-        // ESP32의 /data 경로에 데이터 요청
+        // ESP32에 데이터 요청
         const response = await fetch(`http://${ESP32_IP_ONLY}/data`);
         if (!response.ok) throw new Error('네트워크 응답 없음');
         
@@ -26,17 +26,15 @@ async function fetchData() {
         console.log('수신 데이터:', data);
 
         // --- 데이터 반영 로직 ---
-        // 수현님 코드 구조에 맞게 전력량 계산 (H 채널 기준 예시)
+     
         const powerH = data.rmsH * 220; 
-
         // 1. [데이터 원본 업데이트]
         if (typeof buildings !== 'undefined') {
             buildings.forEach(b => {
                 b.classrooms.forEach(c => {
                     c.devices.forEach(d => {
-                        // 만약 기기 이름 매칭이 필요하다면 여기서 처리
-                        // 우선 전체적으로 전력이 도는지만 확인하려면 아래처럼 테스트
-                        if (d.name === "공기청정기") { // 예시 기기 이름
+                   
+                        if (d.name === "공기청정기") { 
                             d.currentW = powerH;
                             d.isOn = powerH > 5;
                         }
@@ -55,7 +53,7 @@ async function fetchData() {
     }
 }
 
-// 릴레이 제어는 나중에 필요하면 추가 (현재 아두이노 코드엔 제어 경로가 없음)
+
 function sendRelayControl(targetDevice, cmd) {
     alert("현재 아두이노 코드에 제어 기능이 설정되지 않았습니다.");
 }
@@ -74,7 +72,7 @@ async function pollEsp32Once() {
     const data = await res.json();
     applyEsp32Reading(data);
   } catch (err) {
-    // 폴링은 계속 돌되, 콘솔만 남김 (네트워크 환경 따라 일시 실패 가능)
+    
     console.warn("[ESP32 폴링 실패]", String(err?.message ?? err));
   } finally {
     clearTimeout(timeoutId);
@@ -84,7 +82,7 @@ async function pollEsp32Once() {
 function startPolling() {
   if (pollTimer) return;
   console.log(`[ESP32 폴링 시작] ${ESP32_POLL_URL} (${ESP32_POLL_INTERVAL_MS}ms)`);
-  pollEsp32Once(); // 즉시 1회
+  pollEsp32Once(); 
   pollTimer = setInterval(pollEsp32Once, ESP32_POLL_INTERVAL_MS);
 }
 
@@ -95,8 +93,7 @@ function stopPolling() {
 }
 
 
-// 릴레이를 끄고 켜는 함수 (버튼에 연결할 것)
-// 1. [수정] 릴레이 제어 함수: 어떤 기기를(target), 어떻게(cmd) 할지 보냅니다.
+// 릴레이를 끄차단 함수
 async function sendRelayControl(targetDevice, cmd) {
   try {
     const payload =
@@ -243,7 +240,6 @@ function setNote(classroomId, deviceId, note) {
   try {
     localStorage.setItem(getNoteKey(classroomId, deviceId), note);
   } catch {
-    // ignore (private mode / storage blocked)
   }
 }
 
@@ -252,12 +248,11 @@ function setLocked(buildingId, classroomId, deviceId, locked) {
   try {
     localStorage.setItem(getLockKey(buildingId, classroomId, deviceId), locked ? "1" : "0");
   } catch {
-    // ignore
   }
 }
 
 
-// 에너지 절약 모드 ON일 때 자동으로 꺼지는 기기 종류 (전력 절감 효과 극대화)
+
 const ENERGY_SAVING_OFF_DEVICES = new Set([
   "조명(전등)",
   "공기청정기",
@@ -274,7 +269,7 @@ function effectiveDevice(buildingId, classroomId, device) {
   let isOn = typeof state.isOn === "boolean" ? state.isOn : baseOn;
 
 
-  // 에너지 절약 모드: 지정된 기기는 강제로 꺼짐 (전력 대폭 감소)
+ 
   if (loadEnergySavingEnabled() && ENERGY_SAVING_OFF_DEVICES.has(device.name)) {
     isOn = false;
   }
@@ -308,7 +303,7 @@ function buildingTotalW(building) {
 }
 
 
-// 모든 기기가 켜져 있다고 가정했을 때의 이론상 총 소비 전력 (데모용)
+
 function theoreticalBuildingTotalW(building) {
   return building.classrooms.reduce(
     (acc, c) =>
@@ -343,9 +338,9 @@ function getAllActiveDevices() {
         const dev = effectiveDevice(b.id, c.id, d);
         if (dev.isOn && dev.effectiveW > 0) {
           list.push({
-            buildingId: b.id,      // 추가
-            classroomId: c.id,     // 추가
-            deviceId: d.id,        // 추가
+            buildingId: b.id,     
+            classroomId: c.id,    
+            deviceId: d.id,       
             buildingName: b.name,
             buildingShort,
             deviceName: d.name,
@@ -383,7 +378,7 @@ function getTreesBaselineKey() {
 }
 
 
-// 현재 month 기준으로 baseline savedW를 관리 (month가 바뀌면 리셋)
+
 function loadTreesMonthlyBaseline(currentSavedW) {
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -396,7 +391,6 @@ function loadTreesMonthlyBaseline(currentSavedW) {
 
 
     if (!storedMonth || storedMonth !== monthKey || !Number.isFinite(storedBaseline)) {
-      // 새 달이거나 값이 없으면 현재 시점을 baseline으로 저장
       localStorage.setItem(getTreesMonthKey(), monthKey);
       localStorage.setItem(getTreesBaselineKey(), String(currentSavedW));
       return { monthKey, baselineSavedW: currentSavedW };
@@ -410,27 +404,22 @@ function loadTreesMonthlyBaseline(currentSavedW) {
 }
 
 
-// 절약된 전력량을 나무 그루 수로 환산 (데모용 계산)
+
 function calcEnergySavingTrees() {
   const currentTotalW = buildings.reduce((acc, b) => acc + buildingTotalW(b), 0);
   const theoreticalTotalW = buildings.reduce((acc, b) => acc + theoreticalBuildingTotalW(b), 0);
   const rawSavedW = Math.max(0, theoreticalTotalW - currentTotalW);
 
 
-  // 데모 기준: 약 400W 절약당 1그루 (에너지 절약 모드 ON 시 나무가 보이도록)
   const perTreeW = 400;
   const rawTrees = perTreeW > 0 ? Math.round(rawSavedW / perTreeW) : 0;
   const trees = Math.max(0, rawTrees);
 
-
-  // n그루 문구와 동일한 수의 나무 이모지 표시 (최대 30그루)
   const maxDisplay = 30;
   const displayTrees = Math.min(trees, maxDisplay);
 
-
   const ratio = theoreticalTotalW > 0 ? Math.min(1, rawSavedW / theoreticalTotalW) : 0;
   const scale = 0.85 + 0.2 * ratio;
-
 
   return {
     trees,
@@ -455,7 +444,7 @@ function formatDateTime(iso) {
 }
 
 
-// 최근 N일 날짜 라벨 (예: "1/23") 생성
+
 function lastNDaysLabels(n) {
   const labels = [];
   const now = new Date();
@@ -467,12 +456,7 @@ function lastNDaysLabels(n) {
   return labels;
 }
 
-
-// 데모용: 하루 전력량 시계열을 만들기 위한 계수(최근 N일 고정 패턴)
 const DEMO_DAILY_FACTORS = [0.8, 0.9, 1.0, 1.1, 0.95, 1.05, 0.9];
-
-
-// 차트 색상 팔레트
 const CHART_COLORS = [
   "rgba(34, 197, 94, 1)",   // green
   "rgba(59, 130, 246, 1)",  // blue
@@ -635,7 +619,7 @@ function mountInteractions({ buildingId, classroomId } = {}) {
 
 
 function renderClassroomsPage(buildingId, floorId) {
-  // 강의실 페이지 레이아웃을 단순화:
+  // 강의실 페이지 레이아웃:
   // - 맨 위: 검색창
   // - 중간: 아산공학관 / 신공학관 단면도 나란히
   // - 맨 아래: 모든 강의실 리스트 (검색 + 단면도 층 선택으로 필터)
@@ -799,26 +783,18 @@ function renderClassroomsPage(buildingId, floorId) {
     }
   }
 
-
-  // 초기 리스트 렌더링
   renderList();
   updateFloorButtons();
 
 
-  // 검색 입력 이벤트
   searchEl?.addEventListener("input", () => {
     renderList();
   });
 
-
-  // 단면도 층 버튼 이벤트
   for (const floorBtn of Array.from(document.querySelectorAll("[data-building-id][data-floor]"))) {
     floorBtn.addEventListener("click", () => {
       const bid = floorBtn.getAttribute("data-building-id");
       const floor = floorBtn.getAttribute("data-floor") ?? "";
-
-
-      // 같은 버튼을 다시 누르면 필터 해제
       const normalizedFloor = floor || "";
       const isSame =
         activeBuildingId === bid && (activeFloor ?? "") === normalizedFloor;
@@ -854,7 +830,7 @@ function renderCommunity() {
       : "아직 절약된 전력이 거의 없어요. 에너지 절약 모드를 켜거나 기기 전원을 끄면 나무가 자라요!";
 
 
-  // n그루와 동일한 수의 나무 이모지 표시 (🌳 = 나무)
+
   const treesHtml =
     treeStats.displayTrees > 0
       ? Array.from({ length: treeStats.displayTrees })
@@ -1260,7 +1236,6 @@ function renderHome() {
   `);
 
 
-  // 전체 활성 기기 버튼 클릭 → 기기 목록 드롭다운 토글
   const btnActiveDevices = document.getElementById("btn-active-devices");
   const activeDevicesDropdown = document.getElementById("active-devices-dropdown");
   btnActiveDevices?.addEventListener("click", (e) => {
@@ -1277,12 +1252,9 @@ function renderHome() {
   });
   activeDevicesDropdown?.addEventListener("click", (e) => e.stopPropagation());
 
-
-  // 에너지 절약 모드 토글 버튼
   document.getElementById("toggle-energy-saving")?.addEventListener("click", () => {
     const next = !loadEnergySavingEnabled();
     saveEnergySavingEnabled(next);
-    // 나중에 알고리즘 연결용 훅: 여기서 이벤트를 받아 실행하면 됩니다.
     try {
       window.dispatchEvent(new CustomEvent("powerDashboard:energySavingChanged", { detail: { enabled: next } }));
     } catch {
@@ -1291,8 +1263,6 @@ function renderHome() {
     render();
   });
 
-
-  // 각 건물 카드 아래에 작은 일별 전력량 추이 차트 렌더링
   if (window.Chart) {
     const days = 7;
     const labels = lastNDaysLabels(days);
@@ -1303,8 +1273,6 @@ function renderHome() {
       const el = document.getElementById(`daily-power-chart-${t.id}`);
       if (!el) return;
 
-
-      // hashchange 재렌더 대비: 기존 차트가 있으면 제거
       if (el._powerChart && typeof el._powerChart.destroy === "function") {
         el._powerChart.destroy();
       }
@@ -1643,8 +1611,6 @@ function renderClassroomDetail(buildingId, classroomId) {
     });
   }
 
-
-  // block button (demo: turn off + stop working)
   for (const blockBtn of Array.from(document.querySelectorAll("[data-block-btn]"))) {
     blockBtn.addEventListener("click", () => {
       const did = blockBtn.getAttribute("data-device-id");
@@ -1691,12 +1657,9 @@ function render() {
   return renderNotFound();
 }
 
-
-// 기존 디자인 버튼의 클릭 사건만 가로채서 ESP32로 전달
 document.addEventListener('click', async (e) => {
     const text = e.target.innerText || "";
-   
-    // "차단" 버튼을 누르면
+
     if (text.includes("차단")) {
         if (confirm("ESP32: 실제로 전력을 차단하시겠습니까?")) {
             try {
@@ -1710,8 +1673,6 @@ document.addEventListener('click', async (e) => {
         }
     }
 
-
-    // "연결"이나 "ON" 버튼을 누르면
     if (text.includes("연결") || text.includes("ON")) {
         fetch(`${ESP32_HTTP_BASE}/control`, {
             method: 'POST',
