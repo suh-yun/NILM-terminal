@@ -6,22 +6,18 @@
 #include "model_code.h"
 
 
-// 네트워크 설정 (추후 학교 와이파이로 수정 필요)
+
 const char* ssid = "Swtddddnnnn";    
 const char* password = "274926392";
 
-
-// [정적 IP 설정부] - 네트워크 환경에 따라 수정 필요
-IPAddress local_IP(10, 63, 101, 69);  // ESP32에 부여할 고정 IP
-IPAddress gateway(10, 63, 101, 1);    // 공유기(게이트웨이) 주소
-IPAddress subnet(255, 255, 255, 0);   // 서브넷 마스크
-IPAddress primaryDNS(8, 8, 8, 8);     // 선택 사항 (구글 DNS)
+IPAddress local_IP(10, 63, 101, 69); 
+IPAddress gateway(10, 63, 101, 1);  
+IPAddress subnet(255, 255, 255, 0); 
+IPAddress primaryDNS(8, 8, 8, 8);  
 
 
 WebServer server(80);
 
-
-// 하드웨어 및 센서 핀 설정 & 전역 변수 설정
 const int sensorHighPin = 34;
 const int sensorLowPin  = 35;
 const float vRef = 3.3;
@@ -39,10 +35,10 @@ float curRMS_H = 0, curRMS_L = 0;
 String finalState = "None";
 
 
-unsigned long deviceStartTime = 0;   // 기기 가동 시작 시간
-unsigned long restStartTime = 0;     // 공기청정기 휴식 시작 시간
-String lastDetectedState = "None";   // 이전 루프의 기기 상태
-bool isInRestMode = false;           // 공기청정기 강제 휴식 여부
+unsigned long deviceStartTime = 0;  
+unsigned long restStartTime = 0;    
+String lastDetectedState = "None";  
+bool isInRestMode = false;         
 
 
 #define SAMPLES 128
@@ -57,7 +53,7 @@ String stateHistory[WINDOW_SIZE];
 int historyIdx = 0;
 
 
-#define RELAY_PIN 5 // 릴레이 핀 정의
+#define RELAY_PIN 5 
 bool isBlocked = false;
 
 
@@ -67,10 +63,9 @@ struct ChannelFeatures {
 };
 
 
-// 릴레이 복구 함수
 void IRAM_ATTR resetRelay() {
     if(isBlocked = false) {
-        digitalWrite(RELAY_PIN, HIGH); // 전원 공급 재개
+        digitalWrite(RELAY_PIN, HIGH); 
         Serial.println("Power restored via switch.");
     }
 }
@@ -78,14 +73,11 @@ void IRAM_ATTR resetRelay() {
 
 void setup() {
     Serial.begin(115200);
-    calibrateOffsets(); // 영점 조절 함수 호출
+    calibrateOffsets(); 
 
-
-    // 정적 IP 설정 적용
     if (!WiFi.config(local_IP, gateway, subnet, primaryDNS)) {
         Serial.println("Static IP 설정 실패");
     }
-
 
     WiFi.begin(ssid, password);
     Serial.print("WiFi 연결 시도 중");
@@ -102,22 +94,18 @@ void setup() {
     server.on("/data", handleData);
     server.begin();
 
-
-    // 스위치로 릴레이 조정
     pinMode(4, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(4), resetRelay, FALLING);
 }
 
 
 void loop() {
-    // 각 채널의 성분 추출
     ChannelFeatures dataH = getFeatures('H', sensorHighPin, offsetHigh);
     ChannelFeatures dataL = getFeatures('L', sensorLowPin, offsetLow);
    
-    // 추출된 성분을 변수로 저장 & 기기 식별 후, 시리얼 모니터에 결과 출력
     curRMS_H = dataH.rms;
     curRMS_L = dataL.rms;
-    finalState = classifyIntegrated(dataH, dataL); // 기기 식별 함수 호출
+    finalState = classifyIntegrated(dataH, dataL);
 
 
     Serial.printf("H: %.3f A | L: %.3f A | State: %s\n", curRMS_H, curRMS_L, finalState.c_str());
@@ -127,18 +115,15 @@ void loop() {
     String rawState = classifyIntegrated(dataH, dataL);
     String finalState = getSmoothedState(rawState); // Temporal Smoothing 적용
 
-
-    // 차단 로직
     if (!isBlocked) {
         applyPowerPolicy(finalState, dataH.rms);
     }
 
 
-    server.handleClient(); // 웹 서버 업데이트
+    server.handleClient(); 
 }
 
 
-// 영점 조절 함수
 void calibrateOffsets() {
     analogSetAttenuation(ADC_11db);
     Serial.println("\n--- Calibration Starting ---");
@@ -172,8 +157,6 @@ void calibrateOffsets() {
     Serial.printf("\nOffset H: %.4f V / L: %.4f V\n", offsetHigh, offsetLow);
 }
 
-
-// RMS, 고조파 성분 추출 함수
 ChannelFeatures getFeatures(char chType, int pin, float offset) {
     double* vReal = (chType == 'H') ? vRealH : vRealL;
     double* vImag = (chType == 'H') ? vImagH : vImagL;
@@ -206,21 +189,16 @@ ChannelFeatures getFeatures(char chType, int pin, float offset) {
 }
 
 
-// 기기 판별 함수
+
 String classifyIntegrated(ChannelFeatures h, ChannelFeatures l) {
-    // 각 채널별 입력벡터 정의
     double inputH[5] = { (double)h.rms, (double)h.h1, (double)h.h3, (double)h.h5, (double)h.h7 };
     double inputL[5] = { (double)l.rms, (double)l.h1, (double)l.h3, (double)l.h5, (double)l.h7 };
    
     double outputH[6] = {0}, outputL[6] = {0};
 
-
-    // 각각의 독립된 추론 수행
     score(inputH, outputH);
     score(inputL, outputL);
 
-
-    // 결과 통합 (확률값 합산 - Soft Voting)
     double finalOutput[6];
     int bestIdx = 0;
     double bestVal = -1.0;
@@ -239,14 +217,10 @@ String classifyIntegrated(ChannelFeatures h, ChannelFeatures l) {
     return String(labels[bestIdx]);
 }
 
-
-// 결과 안정화(Temporal Smoothing) 함수
 String getSmoothedState(String current) {
     stateHistory[historyIdx] = current;
     historyIdx = (historyIdx + 1) % WINDOW_SIZE;
 
-
-    // 빈도 계산: 가장 많이 등장한 결과 반환
     String modes[6] = {"None", "Pot", "Charger", "AirClean_high", "AirClean_low", "Indu"};
     int counts[6] = {0};
     for(int i=0; i<WINDOW_SIZE; i++) {
@@ -259,8 +233,6 @@ String getSmoothedState(String current) {
     return modes[best];
 }
 
-
-// 전력 차단 방침 구현 함수
 void applyPowerPolicy(String state, float rms) {
     // 1. 상태 변화 감지 및 타이머 초기화
     if (state != lastDetectedState) {
@@ -268,13 +240,8 @@ void applyPowerPolicy(String state, float rms) {
         lastDetectedState = state;
     }
 
-
-    // 이미 차단된 상태라면 아래 로직을 수행하지 않음 (단, 공기청정기 복구 로직 제외)
     if (isBlocked && !isInRestMode) return;
 
-
-    // --- [4. 비정상 패턴 감지 (공통)] ---
-    // 각 기기별 정상 RMS 임계값 설정 (예시값이니 실제 측정값으로 튜닝하세요)
     float expectedRMS = 0;
     if (state == "Pot") expectedRMS = 5.0;         // 포트 약 5A
     else if (state == "Indu") expectedRMS = 7.0;   // 인덕션 약 7A
@@ -285,8 +252,6 @@ void applyPowerPolicy(String state, float rms) {
         return;
     }
 
-
-    // --- [1. 안전 최우선 정책 (Pot, Indu)] ---
     if (state == "Pot" || state == "Indu") {
         if (millis() - deviceStartTime > 1800000) { // 30분(30 * 60 * 1000)
             executeCut("Safety Timeout: High-heat device left for 30m");
@@ -294,8 +259,6 @@ void applyPowerPolicy(String state, float rms) {
         }
     }
 
-
-    // --- [2. 대기 전력 제로 정책 (Charger)] ---
     if (state == "Charger") {
         if (rms > 0.01 && rms < 0.05) { // 사용 중이다가 0.05A 이하로 떨어지면
             executeCut("Eco Mode: Charger fully charged (Low RMS)");
@@ -303,9 +266,6 @@ void applyPowerPolicy(String state, float rms) {
         }
     }
 
-
-    // --- [3. 공기청정기 스마트 루틴 (AirClean)] ---
-    // 가동 로직
     if (state == "AirClean_high" && !isInRestMode) {
         if (millis() - deviceStartTime > 3600000) { // 1시간 가동 시
             digitalWrite(RELAY_PIN, LOW); // 15분간 휴식 시작
@@ -315,7 +275,7 @@ void applyPowerPolicy(String state, float rms) {
             Serial.println("Smart Routine: AirClean High 1h - Resting 15m");
         }
     }
-    // 휴식 복구 로직
+   
     if (isInRestMode) {
         if (millis() - restStartTime > 900000) { // 15분 휴식 끝
             digitalWrite(RELAY_PIN, HIGH);
@@ -328,7 +288,6 @@ void applyPowerPolicy(String state, float rms) {
 }
 
 
-// 공통 차단 함수 (중복 제거)
 void executeCut(String reason) {
     digitalWrite(RELAY_PIN, LOW);
     isBlocked = true;
@@ -336,8 +295,6 @@ void executeCut(String reason) {
     Serial.println(reason);
 }
 
-
-// 웹사이트 전송 함수
 void handleData() {
     JsonDocument doc;
     doc["rmsH"] = String(curRMS_H, 3);
