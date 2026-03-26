@@ -1,0 +1,201 @@
+#include <Arduino.h>
+#include <arduinoFFT.h>
+#include <ArduinoJson.h>
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+#include "model_code.h"
+
+
+// --- [1. 전역 변수 설정] ---
+const char* ssid = "최수현";      // 핫스팟 이름과 똑같아야 함
+const char* password = "00000000"; // 핫스팟 비번
+
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+
+// 핀 번호 정의
+const int sensorHighPin = 34, sensorLowPin = 35;
+const int redLedPin = 16, whiteLedPin = 17, recoveryButtonPin = 18;
+const int IN1 = 12, IN2 = 13, IN3 = 14, IN4 = 15;
+const float vRef = 3.3, sensitivity = 0.1, voltageDividerRatio = 2.0;
+const int adcRes = 4095;
+float offsetHigh = 2.5, offsetLow = 2.5;
+
+
+// FFT 관련
+#define SAMPLES 128
+#define SAMPLING_FREQ 1000
+double vRealH[SAMPLES], vImagH[SAMPLES], vRealL[SAMPLES], vImagL[SAMPLES];
+ArduinoFFT<double> FFTH = ArduinoFFT<double>(vRealH, vImagH, SAMPLES, SAMPLING_FREQ);
+ArduinoFFT<double> FFTL = ArduinoFFT<double>(vRealL, vImagL, SAMPLES, SAMPLING_FREQ);
+
+
+String currentStateH = "UNKNOWN", currentStateL = "UNKNOWN";
+unsigned long startTimeH = 0, startTimeL = 0;
+bool cutoffExecutedH = false, cutoffExecutedL = false;
+
+
+// --- [2. 상태 안정화 클래스] ---
+class StateStabilizer {
+  private:
+    String buffer[5];
+    int index = 0, window = 5;
+  public:
+    StateStabilizer(int w) : window(w > 5 ? 5 : w) { for(int i=0; i<5; i++) buffer[i]=""; }
+    String update(String new_state) {
+        buffer[index] = new_state;
+        index = (index + 1) % window;
+        int match = 0;
+        for (int i=0; i<window; i++) if (buffer[i] == new_state) match++;
+        return (match == window) ? new_state : "";
+    }
+};
+StateStabilizer stabilizerH(5), stabilizerL(5);
+
+
+// 함수 선형 선언
+void processChannel(char chType, int pin, float offset);
+void pulseRelay(int pin);
+String predict_state(float rms, float h1, float h3, float h5, float h7);
+
+
+// --- [3. SETUP] ---
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+
+  pinMode(redLedPin, OUTPUT); pinMode(whiteLedPin, OUTPUT);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  pinMode(recoveryButtonPin, INPUT_PULLUP);
+  analogReadResolution(12);
+
+
+  pulseRelay(IN1); delay(200); pulseRelay(IN3);
+  digitalWrite(redLedPin, HIGH); digitalWrite(whiteLedPin, HIGH);
+
+
+  Serial.println("\nConnecting to WiFi...");
+  WiFi.begin(ssid, password);
+
+
+  int attempt = 0;
+  while (WiFi.status() != WL_CONNECTED && attempt < 20) {
+    delay(500);
+    Serial.print(".");
+    attempt++;
+  }
+
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.print("IP: "); Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi Failed. Check Hotspot!");
+  }
+
+
+  server.addHandler(&ws);
+  server.begin();
+  Serial.println("System Ready");
+}
+
+
+// --- [4. LOOP] ---
+void loop() {
+  if (digitalRead(recoveryButtonPin) == LOW) {
+      pulseRelay(IN1); delay(100); pulseRelay(IN3);
+      digitalWrite(redLedPin, HIGH); digitalWrite(whiteLedPin, HIGH);
+      cutoffExecutedH = false; cutoffExecutedL = false;
+      while(digitalRead(recoveryButtonPin) == LOW);
+  }
+
+
+  processChannel('H', sensorHighPin, offsetHigh);
+  processChannel('L', sensorLowPin, offsetLow);
+ 
+  ws.cleanupClients();
+  delay(100);
+}
+
+
+// --- [5. 주요 기능 함수] ---
+void processChannel(char chType, int pin, float offset) {
+    double* vReal = (chType == 'H') ? vRealH : vRealL;
+    double* vImag = (chType == 'H') ? vImagH : vImagL;
+    ArduinoFFT<double>& FFT = (chType == 'H') ? FFTH : FFTL;
+
+
+    double sumSq = 0;
+    for (int i = 0; i < SAMPLES; i++) {
+        float val = (analogRead(pin) * vRef / adcRes) * voltageDividerRatio;
+        vReal[i] = (val - offset) / sensitivity;
+        vImag[i] = 0;
+        sumSq += vReal[i] * vReal[i];
+        delayMicroseconds(1000);
+    }
+
+
+    float rms = sqrt(sumSq / SAMPLES);
+    if (rms < 0.1) rms = 0;
+
+
+    FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+    FFT.compute(FFT_FORWARD);
+    FFT.complexToMagnitude();
+
+
+    float h1 = (float)vReal[8], h3 = (float)vReal[23], h5 = (float)vReal[38], h7 = (float)vReal[54];
+
+
+    String raw = predict_state(rms, h1, h3, h5, h7);
+    String stable = (chType == 'H') ? stabilizerH.update(raw) : stabilizerL.update(raw);
+
+
+    String &current = (chType == 'H') ? currentStateH : currentStateL;
+    unsigned long &sTime = (chType == 'H') ? startTimeH : startTimeL;
+    bool &cutoff = (chType == 'H') ? cutoffExecutedH : cutoffExecutedL;
+
+
+    if (stable != "" && stable != current) {
+        current = stable;
+        sTime = millis();
+        cutoff = false;
+    }
+
+
+    JsonDocument doc; // ArduinoJson v7 대응
+    doc["ch"] = String(chType);
+    doc["current_a"] = rms;
+    doc["device"] = current;
+    String jsonString;
+    serializeJson(doc, jsonString);
+    ws.textAll(jsonString);
+
+
+    if (current == "Standby" && !cutoff) {
+        if ((millis() - sTime) / 1000 >= 600) {
+            if (chType == 'H') { pulseRelay(IN4); digitalWrite(redLedPin, LOW); }
+            else { pulseRelay(IN2); digitalWrite(whiteLedPin, LOW); }
+            cutoff = true;
+        }
+    }
+}
+
+
+void pulseRelay(int pin) {
+    digitalWrite(pin, HIGH); delay(100); digitalWrite(pin, LOW);
+}
+
+
+String predict_state(float rms, float h1, float h3, float h5, float h7) {
+    if (rms < 0.12) return "Standby";
+    return "Active";
+}
+
+
+
