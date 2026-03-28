@@ -5,14 +5,7 @@
 #include <WebServer.h>
 #include "model_code.h"
 
-// 네트워크 설정
-const char* ssid = "Swtddddnnnn"; 
-const char* password = "274926392"; 
-IPAddress local_IP(10, 63, 101, 69);
-IPAddress gateway(10, 63, 101, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8);
-WebServer server(80);
+// 네트워크 설정(숨김)
 
 // 하드웨어 설정
 const int sensorHighPin = 34;
