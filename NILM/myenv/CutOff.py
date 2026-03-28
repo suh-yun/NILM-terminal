@@ -1,0 +1,129 @@
+import serial
+import numpy as np
+import pandas as pd
+import time
+import joblib
+from collections import deque
+
+# ===============================
+# 1. 설정
+# ===============================
+PORT = 'COM5'
+BAUD = 115200
+
+# 모델 로드 (고전력/저전력 공용 혹은 각각 로드 가능)
+model = joblib.load('nilm_model.pkl')
+feature_cols = ['current', 'H1', 'H3', 'H5', 'H7']
+ser = serial.Serial(PORT, BAUD, timeout=1)
+
+
+# 상태 안정화 클래스 (채널별로 관리하기 위해 인스턴스 2개 생성)
+class StateStabilizer:
+    def __init__(self, window=5):
+        self.window = window
+        self.buffer = deque(maxlen=window)
+        self.stable_state = None
+
+    def update(self, new_state):
+        self.buffer.append(new_state)
+        if self.buffer.count(new_state) == self.window:
+            self.stable_state = new_state
+        return self.stable_state
+
+
+# 고전력(High)용과 저전력(Low)용 안정화 장치 분리
+stabilizer_H = StateStabilizer(window=5)
+stabilizer_L = StateStabilizer(window=5)
+
+# 채널별 상태 관리 변수
+states = {
+    'H': {'current': None, 'start_time': None, 'cutoff': False},
+    'L': {'current': None, 'start_time': None, 'cutoff': False}
+}
+
+# ===============================
+# 3. 전력 차단 전략
+# ===============================
+STRATEGY = {
+    "Standby": {"limit": 600},  # 10분 후 차단
+    "Active": {"limit": None}
+}
+
+
+def execute_cutoff(channel):
+    """채널에 맞는 차단 명령 전송"""
+    cmd = f"{channel}_OFF\n".encode()  # H_OFF\n 또는 L_OFF\n
+    ser.write(cmd)
+    states[channel]['cutoff'] = True
+    print(f"\n[⚡ {channel} 채널 전력 차단 실행!]")
+
+
+# ===============================
+# 4. 메인 루프
+# ===============================
+print("=== NILM 듀얼 채널 제어 시스템 시작 ===")
+
+try:
+    while True:
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+
+            # (1) 채널 식별 및 데이터 파싱
+            if not line or ',' not in line: continue
+            parts = line.split(',')
+            channel = parts[0]  # 'H' 또는 'L'
+
+            if channel not in ['H', 'L']: continue
+
+            try:
+                waveform = np.array([float(v) for v in parts[1:]])
+                if len(waveform) < 10: continue
+
+                # (2) 특징 추출
+                rms = np.sqrt(np.mean(waveform ** 2))
+                fft_raw = np.abs(np.fft.rfft(waveform))
+                h_indices = [1, 3, 5, 7]
+                h_features = [fft_raw[i] if len(fft_raw) > i else 0 for i in h_indices]
+
+                # (3) ML 예측
+                if rms < 0.05:  # 아주 낮은 전류는 무조건 대기상태
+                    raw_state = "Standby"
+                else:
+                    X = pd.DataFrame([[rms] + h_features], columns=feature_cols)
+                    # 모델 예측 확률 확인
+                    probs = model.predict_proba(X)
+                    max_prob = np.max(probs) * 100
+
+                    # 80% 이상의 확신이 있을 때만 Active로 인정
+                    raw_state = "Active" if max_prob > 80 else "Standby"
+
+                # (4) 상태 안정화 (채널별 적용)
+                current_stabilizer = stabilizer_H if channel == 'H' else stabilizer_L
+                stable_state = current_stabilizer.update(raw_state)
+
+                if stable_state is None: continue
+
+                # 상태 변화 감지 및 타이머 리셋
+                ch_info = states[channel]
+                if stable_state != ch_info['current']:
+                    ch_info['current'] = stable_state
+                    ch_info['start_time'] = time.time()
+                    ch_info['cutoff'] = False
+                    print(f"[{time.strftime('%H:%M:%S')}] {channel} 채널 상태 확정 → {stable_state}")
+                    continue
+
+                # (5) 전력 차단 판단
+                strategy = STRATEGY.get(stable_state)
+                if not strategy or ch_info['cutoff']: continue
+
+                if stable_state == "Standby" and strategy["limit"] is not None:
+                    elapsed = time.time() - ch_info['start_time']
+                    if elapsed > strategy["limit"]:
+                        execute_cutoff(channel)
+
+            except Exception as e:
+                print(f"Error processing channel {channel}: {e}")
+
+except KeyboardInterrupt:
+    print("\n시스템 종료")
+    ser.close()
