@@ -42,7 +42,7 @@ ArduinoFFT<double> FFTH = ArduinoFFT<double>(vRealH, vImagH, SAMPLES, SAMPLING_F
 ArduinoFFT<double> FFTL = ArduinoFFT<double>(vRealL, vImagL, SAMPLES, SAMPLING_FREQ);
 
 // 분류 라벨 (4종)
-const char* labels[4] = {"Charger", "Charger", "None", "Pot"};
+const char* labels[4] = {"AirClean", "Charger", "None", "Pot"};
 
 struct ChannelFeatures {
     float rms;
